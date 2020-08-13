@@ -92,3 +92,7 @@ The number of test instances: 4636
 Report precision, recall, and f1:
 0.942, 0.949, 0.945
 ```
+
+
+### 测试模型
+python run_kbert_ner_test.py --pretrained_model_path ./models/google_model.bin --config_path ./models/google_config.json  --vocab_path ./models/google_vocab.txt --train_path ./datasets/msra_ner/train.tsv --dev_path ./datasets/msra_ner/dev.tsv --test_path ./datasets/msra_ner/test.tsv --epochs_num 1 --batch_size 16 --kg_name CnDbpedia  --output_model_path ./outputs/kbert_msraner_CnDbpedia.bin
