@@ -17,3 +17,16 @@ with open('train.tsv', mode="r", encoding="utf-8") as f:
 print(labels_map)
 print('*' * 100)
 print(begin_ids)
+'''
+输出结果为：
+{'[PAD]': 0, '[ENT]': 1, 'O': 2, 'B-LOC': 3, 'I-LOC': 4, 'B-PER': 5, 'I-PER': 6, 'B-ORG': 7, 'I-ORG': 8}
+****************************************************************************************************
+[3, 5, 7]
+'''
+
+with open('1.txt', encoding='utf-8') as fp:
+    for line in fp.readlines():
+        line = line.strip()
+        if line == '':
+            continue
+        print(len(line.split()))

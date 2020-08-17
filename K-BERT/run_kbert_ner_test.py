@@ -157,6 +157,10 @@ def main():
     print("Labels: ", labels_map)
     args.labels_num = len(labels_map)
 
+    id2label = {}
+    for key in labels_map:
+        id2label[labels_map[key]] = key
+
     # Load vocabulary. 加载字典
     vocab = Vocab()
     vocab.load(args.vocab_path)  # 在第344行存在一个“空” 在字典加载时，代码对其进行了保护
@@ -174,12 +178,12 @@ def main():
     args.target = "bert"
     model = build_model(args)  # 模型的
 
-    # Load or initialize parameters. 加载预训练模型
+    # Load or initialize parameters.
     if args.pretrained_model_path is not None:
         # Initialize with pretrained model.
         model.load_state_dict(torch.load(args.pretrained_model_path), strict=False)
     else:
-        # Initialize with normal distribution.  网络的名字以及参数
+        # Initialize with normal distribution.
         for n, p in list(model.named_parameters()):
             if 'gamma' not in n and 'beta' not in n:
                 p.data.normal_(0, 0.02)
@@ -230,6 +234,9 @@ def main():
                 text = ''.join(tokens.split(" "))
                 tokens, pos, vm, tag = kg.add_knowledge_with_vm([text], add_pad=True, max_length=args.seq_length)
                 tokens = tokens[0]
+
+                # print(tokens)
+
                 pos = pos[0]
                 vm = vm[0].astype("bool")
                 tag = tag[0]
@@ -281,7 +288,8 @@ def main():
         confusion = torch.zeros(len(labels_map), len(labels_map), dtype=torch.long)
 
         model.eval()
-
+        pred_label_list = []
+        gold_label_list = []
         for i, (
                 input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vm_ids_batch,
                 tag_ids_batch) in enumerate(
@@ -296,14 +304,22 @@ def main():
 
             loss, _, pred, gold = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vm_ids_batch)
 
+            gold_label_linshi = []
             for j in range(gold.size()[0]):
                 if gold[j].item() in begin_ids:
                     gold_entities_num += 1
+                gold_label_linshi.append(id2label[gold[j].item()])
 
+            pred_label_linshi = []
             for j in range(pred.size()[0]):
                 if pred[j].item() in begin_ids and gold[j].item() != labels_map["[PAD]"]:
                     pred_entities_num += 1
 
+                pred_label_linshi.append(id2label[pred[j].item()])
+                # print('pred[j]:', pred[j])
+                # print('pred[j].item():', pred[j].item())
+            pred_label_list.append(pred_label_linshi)
+            gold_label_list.append(gold_label_linshi)
             pred_entities_pos = []
             gold_entities_pos = []
             start, end = 0, 0
@@ -329,10 +345,8 @@ def main():
                         labels_map["[ENT]"]:
                     start = j
                     for k in range(j + 1, pred.size()[0]):
-
                         if gold[k].item() == labels_map['[ENT]']:
                             continue
-
                         if pred[k].item() == labels_map["[PAD]"] or pred[k].item() == labels_map["O"] or pred[
                             k].item() in begin_ids:
                             end = k - 1
@@ -353,25 +367,29 @@ def main():
         f1 = 2 * p * r / (p + r)
         print("{:.3f}, {:.3f}, {:.3f}".format(p, r, f1))
 
+        with open('outputs/pred_label.txt', 'w', encoding='utf-8') as fp:
+            for i in range(len(pred_label_list)):
+                fp.write('pred: '+'\t'.join(pred_label_list[i]) + '\n')
+                fp.write('gold: '+'\t'.join(gold_label_list[i]) + '\n')
         return f1
 
     # Training phase.
-    print("Start training.")
-    instances = read_dataset(args.train_path)
+    # print("Start training.")
+    # instances = read_dataset(args.train_path)
+    #
+    # input_ids = torch.LongTensor([ins[0] for ins in instances])
+    # label_ids = torch.LongTensor([ins[1] for ins in instances])
+    # mask_ids = torch.LongTensor([ins[2] for ins in instances])
+    # pos_ids = torch.LongTensor([ins[3] for ins in instances])
+    # vm_ids = torch.BoolTensor([ins[4] for ins in instances])
+    # tag_ids = torch.LongTensor([ins[5] for ins in instances])
+    #
+    # instances_num = input_ids.size(0)
+    # batch_size = args.batch_size
+    # train_steps = int(instances_num * args.epochs_num / batch_size) + 1
 
-    input_ids = torch.LongTensor([ins[0] for ins in instances])
-    label_ids = torch.LongTensor([ins[1] for ins in instances])
-    mask_ids = torch.LongTensor([ins[2] for ins in instances])
-    pos_ids = torch.LongTensor([ins[3] for ins in instances])
-    vm_ids = torch.BoolTensor([ins[4] for ins in instances])
-    tag_ids = torch.LongTensor([ins[5] for ins in instances])
-
-    instances_num = input_ids.size(0)
-    batch_size = args.batch_size
-    train_steps = int(instances_num * args.epochs_num / batch_size) + 1
-
-    print("Batch size: ", batch_size)
-    print("The number of training instances:", instances_num)
+    # print("Batch size: ", batch_size)
+    # print("The number of training instances:", instances_num)
 
     param_optimizer = list(model.named_parameters())
     no_decay = ['bias', 'gamma', 'beta']
@@ -379,60 +397,75 @@ def main():
         {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], 'weight_decay_rate': 0.01},
         {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay_rate': 0.0}
     ]
-    optimizer = BertAdam(optimizer_grouped_parameters, lr=args.learning_rate, warmup=args.warmup, t_total=train_steps)
+    # optimizer = BertAdam(optimizer_grouped_parameters, lr=args.learning_rate, warmup=args.warmup, t_total=train_steps)
 
-    total_loss = 0.
-    f1 = 0.0
-    best_f1 = 0.0
-
-    for epoch in range(1, args.epochs_num + 1):
-        model.train()
-        for i, (
-                input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vm_ids_batch,
-                tag_ids_batch) in enumerate(
-            batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vm_ids, tag_ids)):
-            model.zero_grad()
-
-            input_ids_batch = input_ids_batch.to(device)
-            label_ids_batch = label_ids_batch.to(device)
-            mask_ids_batch = mask_ids_batch.to(device)
-            pos_ids_batch = pos_ids_batch.to(device)
-            tag_ids_batch = tag_ids_batch.to(device)
-            vm_ids_batch = vm_ids_batch.long().to(device)
-
-            loss, _, _, _ = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vm_ids_batch)
-            if torch.cuda.device_count() > 1:
-                loss = torch.mean(loss)
-            total_loss += loss.item()
-            if (i + 1) % args.report_steps == 0:
-                print("Epoch id: {}, Training steps: {}, Avg loss: {:.3f}".format(epoch, i + 1,
-                                                                                  total_loss / args.report_steps))
-                total_loss = 0.
-
-            loss.backward()
-            optimizer.step()
-
-        # Evaluation phase.
-        print("Start evaluate on dev dataset.")
-        f1 = evaluate(args, False)
-        print("Start evaluation on test dataset.")
-        evaluate(args, True)
-
-        if f1 > best_f1:
-            best_f1 = f1
-            save_model(model, args.output_model_path)
-        else:
-            continue
-
-    # Evaluation phase.
-    print("Final evaluation on test dataset.")
-
-    if torch.cuda.device_count() > 1:
+    # 测试模型 *************************************************************
+    print("Start testing.")
+    print(args.train_or_test)
+    if torch.cuda.device_count() > 0:
+        print(11111)
         model.module.load_state_dict(torch.load(args.output_model_path))
     else:
+        print(2222)
         model.load_state_dict(torch.load(args.output_model_path))
 
     evaluate(args, True)
+    print(3333)
+    print(44444)
+    # 测试模型 *************************************************************
+
+    # total_loss = 0.
+    # f1 = 0.0
+    # best_f1 = 0.0
+    #
+    # for epoch in range(1, args.epochs_num + 1):
+    #     model.train()
+    #     for i, (
+    #             input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vm_ids_batch,
+    #             tag_ids_batch) in enumerate(
+    #         batch_loader(batch_size, input_ids, label_ids, mask_ids, pos_ids, vm_ids, tag_ids)):
+    #         model.zero_grad()
+    #
+    #         input_ids_batch = input_ids_batch.to(device)
+    #         label_ids_batch = label_ids_batch.to(device)
+    #         mask_ids_batch = mask_ids_batch.to(device)
+    #         pos_ids_batch = pos_ids_batch.to(device)
+    #         tag_ids_batch = tag_ids_batch.to(device)
+    #         vm_ids_batch = vm_ids_batch.long().to(device)
+    #
+    #         loss, _, _, _ = model(input_ids_batch, label_ids_batch, mask_ids_batch, pos_ids_batch, vm_ids_batch)
+    #         if torch.cuda.device_count() > 1:
+    #             loss = torch.mean(loss)
+    #         total_loss += loss.item()
+    #         if (i + 1) % args.report_steps == 0:
+    #             print("Epoch id: {}, Training steps: {}, Avg loss: {:.3f}".format(epoch, i + 1,
+    #                                                                               total_loss / args.report_steps))
+    #             total_loss = 0.
+    #
+    #         loss.backward()
+    #         optimizer.step()
+    #
+    #     # Evaluation phase.
+    #     print("Start evaluate on dev dataset.")
+    #     f1 = evaluate(args, False)
+    #     print("Start evaluation on test dataset.")
+    #     evaluate(args, True)
+    #
+    #     if f1 > best_f1:
+    #         best_f1 = f1
+    #         save_model(model, args.output_model_path)
+    #     else:
+    #         continue
+    #
+    # # Evaluation phase.
+    # print("Final evaluation on test dataset.")
+    #
+    # if torch.cuda.device_count() > 1:
+    #     model.module.load_state_dict(torch.load(args.output_model_path))
+    # else:
+    #     model.load_state_dict(torch.load(args.output_model_path))
+    #
+    # evaluate(args, True)
 
 
 if __name__ == "__main__":
